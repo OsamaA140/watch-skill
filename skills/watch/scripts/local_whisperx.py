@@ -52,13 +52,15 @@ def executable_path(cfg: dict, *, require_ready=True) -> Path:
     return executable
 
 
-def command(executable: Path, audio: Path, output: Path, cfg: dict) -> list[str]:
+def command(executable: Path, audio: Path, output: Path, cfg: dict, prompt: str | None = None) -> list[str]:
     cmd = [str(executable), str(audio.resolve()), '--model', cfg['whisperx_model'],
            '--device', cfg['whisperx_device'], '--compute_type', cfg['whisperx_compute_type'],
            '--batch_size', str(cfg['whisperx_batch_size']), '--output_dir', str(output.resolve()),
            '--output_format', 'json', '--task', 'transcribe', '--no_align', '--vad_method', 'silero', '--verbose', 'False']
     if cfg['whisperx_language']:
         cmd += ['--language', cfg['whisperx_language']]
+    if prompt:
+        cmd += ['--initial_prompt', prompt]
     return cmd
 
 
@@ -129,7 +131,7 @@ def run_inference(cmd: list[str], timeout: float | None = None) -> None:
         raise SystemExit(f'WhisperX failed (exit {process.returncode}). {hint}\n{detail}')
 
 
-def transcribe_audio(audio: Path, cfg=None, *, require_ready=True, language=None):
+def transcribe_audio(audio: Path, cfg=None, *, require_ready=True, language=None, prompt=None):
     cfg = settings(cfg)
     if language:  # A per-run hint (CLI, WATCH_LANGUAGE, or video metadata) overrides the saved one.
         cfg['whisperx_language'] = validate_language(language, '--language')
@@ -137,7 +139,7 @@ def transcribe_audio(audio: Path, cfg=None, *, require_ready=True, language=None
     print(f"[watch] local WhisperX {cfg['whisperx_model']} transcription; CPU runs may take several minutes.", file=sys.stderr, flush=True)
     with tempfile.TemporaryDirectory(prefix='watch-whisperx-', dir=audio.parent) as temporary:
         output = Path(temporary)
-        run_inference(command(executable, audio, output, cfg), cfg['whisperx_timeout'])
+        run_inference(command(executable, audio, output, cfg, prompt), cfg['whisperx_timeout'])
         try:
             data = json.loads((output / f'{audio.stem}.json').read_text(encoding='utf-8'))
             segments = normalize_segments(data)

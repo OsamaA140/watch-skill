@@ -187,7 +187,7 @@ def _status(detailed=False):
               'has_api_key': has_key, 'backend_ready': backend_ready,
               'whisperx_ready': local_ready, 'whisperx_bin': cfg['whisperx_bin'],
               'whisperx_model': cfg['whisperx_model'], 'onnx_ready': onnx_ready, 'onnx_model': cfg['onnx_model'],
-              'config_file': str(CONFIG_FILE),
+              'vault_dir': cfg['vault_dir'] or None, 'config_file': str(CONFIG_FILE),
               'watch_detail': cfg['detail'], 'platform': platform.system()}
     if detailed:
         tools = {}
@@ -312,7 +312,7 @@ def cmd_cloud_defaults(speech=True):
     return 0 if not missing else 2
 
 
-def cmd_preferences(language=None, site_cookies=None):
+def cmd_preferences(language=None, site_cookies=None, vault=None):
     """Save optional preferences without touching anything else."""
     _scaffold_env()
     values = {}
@@ -323,6 +323,14 @@ def cmd_preferences(language=None, site_cookies=None):
         text = '' if site_cookies.strip().lower() in ('', 'none', 'off') else site_cookies
         parse_site_cookies(text)  # Validate before saving.
         values['WATCH_SITE_COOKIES'] = text
+    if vault is not None:
+        if vault.strip().lower() in ('', 'none', 'off'):
+            values['WATCH_VAULT_DIR'] = ''
+        else:
+            folder = Path(vault).expanduser().resolve()
+            if not folder.is_dir():
+                raise ConfigError('--vault must be an existing folder (your Obsidian vault or notes folder).')
+            values['WATCH_VAULT_DIR'] = str(folder)
     write_settings(values, CONFIG_FILE)
     saved = ', '.join(f'{k}={v or "(cleared)"}' for k, v in values.items())
     print(f'[setup] Saved {saved} to {CONFIG_FILE}.')
@@ -420,6 +428,7 @@ def main():
     parser.add_argument('--engine', choices=sorted(ENGINES))
     parser.add_argument('--language', help='Save a default spoken-language hint (two letters, or auto to clear)')
     parser.add_argument('--site-cookies', help='Save per-site logins, e.g. "instagram.com=chrome" (none to clear)')
+    parser.add_argument('--vault', help='Save the notes folder (e.g. an Obsidian vault) for saved reports (none to clear)')
     args = parser.parse_args()
     try:
         if args.check:
@@ -430,8 +439,8 @@ def main():
             return cmd_cloud_defaults(speech=not args.no_speech)
         if args.install_onnx:
             return cmd_install('onnx', args.detail, args.engine)
-        if args.language is not None or args.site_cookies is not None:
-            code = cmd_preferences(args.language, args.site_cookies)
+        if args.language is not None or args.site_cookies is not None or args.vault is not None:
+            code = cmd_preferences(args.language, args.site_cookies, args.vault)
             if not (args.backend or args.detail or args.engine or args.install_whisperx):
                 return code
         return cmd_install('whisperx' if args.install_whisperx else args.backend, args.detail, args.engine)

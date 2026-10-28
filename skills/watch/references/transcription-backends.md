@@ -19,8 +19,8 @@ If a small-model transcript is nonsense, suggest the actual spoken-language hint
 
 ## groq / openai
 
-Cloud Whisper (`whisper-large-v3` on Groq, `whisper-1` on OpenAI). Only extracted mono 16 kHz audio is uploaded, within a 24,000,000-byte budget, and longer audio is chunked. The spoken-language hint is sent as the `language` field.
+Cloud Whisper (`whisper-large-v3` on Groq, `whisper-1` on OpenAI). Only extracted mono 16 kHz audio is uploaded, within a 24,000,000-byte budget, and longer audio is chunked. The spoken-language hint is sent as the `language` field and `--prompt` as the `prompt` field (WhisperX gets it as `--initial_prompt`; onnx has no prompt).
 
 ## setup.py --json fields
 
-`status`, `can_proceed`, `engine`, `configured_engine`, `gemini_key_present` (boolean only), `gemini_model`, `binaries_required`, `cloud_sandbox`, `local_files_ready` (FFmpeg and ffprobe present), `language`, `site_cookies` (domains and kinds only), `first_run`, `setup_complete`, `missing_binaries`, `whisper_backend`, `configured_backend`, `has_api_key`, `backend_ready`, `whisperx_ready`, `whisperx_bin`, `whisperx_model`, `onnx_ready`, `onnx_model`, `config_file`, `watch_detail`, `platform`, plus `tools` and `youtube` diagnostics in detailed mode. Detailed mode may start the WhisperX CLI's `--help`; `--check` never does.
+`status`, `can_proceed`, `engine`, `configured_engine`, `gemini_key_present` (boolean only), `gemini_model`, `binaries_required`, `cloud_sandbox`, `local_files_ready` (FFmpeg and ffprobe present), `language`, `site_cookies` (domains and kinds only), `first_run`, `setup_complete`, `missing_binaries`, `whisper_backend`, `configured_backend`, `has_api_key`, `backend_ready`, `whisperx_ready`, `whisperx_bin`, `whisperx_model`, `onnx_ready`, `onnx_model`, `vault_dir`, `config_file`, `watch_detail`, `platform`, plus `tools` and `youtube` diagnostics in detailed mode. Detailed mode may start the WhisperX CLI's `--help`; `--check` never does.

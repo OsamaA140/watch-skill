@@ -31,8 +31,9 @@ DEFAULT_FRAMES_PER_VIDEO = 8
 DEFAULT_JOBS = 3
 DEFAULT_TIMEOUT = 900
 FIELD_RE = re.compile(r'^- \*\*([^*]+):\*\* (.*)$')
+PACE_RE = re.compile(r'([\d.]+) cuts/min, mean shot ([\d.]+)s')
 SUMMARY_FIELDS = ['index', 'status', 'source', 'title', 'uploader', 'upload_date', 'duration',
-                  'engagement', 'frames', 'transcript', 'report', 'error']
+                  'engagement', 'cuts_per_min', 'mean_shot_s', 'editing_pace', 'frames', 'transcript', 'report', 'error']
 
 
 def read_sources(args) -> list[str]:
@@ -80,13 +81,16 @@ def watch_command(source: str, args, out_dir: Path) -> list[str]:
     for flag, value in (('--question', args.question), ('--engine', args.engine), ('--language', args.language),
                         ('--resolution', args.resolution), ('--whisper', args.whisper), ('--sub-lang', args.sub_lang),
                         ('--cookies', args.cookies), ('--cookies-from-browser', args.cookies_from_browser),
-                        ('--start', args.start), ('--end', args.end)):
+                        ('--start', args.start), ('--end', args.end), ('--hook', args.hook),
+                        ('--prompt', args.prompt)):
         if value is not None:
             cmd += [flag, str(value)]
     if args.no_whisper:
         cmd.append('--no-whisper')
     if args.no_dedup:
         cmd.append('--no-dedup')
+    if args.pacing is not None:
+        cmd.append('--pacing' if args.pacing else '--no-pacing')
     return cmd
 
 
@@ -130,7 +134,13 @@ def run_one(index: int, source: str, args, batch_dir: Path) -> dict:
     entry.update(title=fields.get('Title', ''), uploader=fields.get('Uploader', ''),
                  upload_date=fields.get('Upload date', ''), duration=fields.get('Duration', ''),
                  engagement=fields.get('Engagement', '').removesuffix(' (at fetch time)'),
-                 frames=fields['_frames'], transcript=fields.get('Transcript', ''))
+                 frames=fields['_frames'], transcript=fields.get('Transcript', ''),
+                 editing_pace=fields.get('Editing pace', ''))
+    pace = PACE_RE.search(entry['editing_pace'])
+    if pace:
+        entry.update(cuts_per_min=pace.group(1), mean_shot_s=pace.group(2))
+    elif entry['editing_pace'].startswith('no hard cuts'):
+        entry.update(cuts_per_min='0', mean_shot_s=fields.get('Duration', '').rpartition('(')[2].rstrip('s)'))
     if code == 0 and (fields['_frames'] or fields['_gemini'] or 'segments' in entry['transcript']):
         entry['status'] = 'partial' if fields['_unavailable'] else 'ok'
     elif code == 0:
@@ -141,7 +151,7 @@ def run_one(index: int, source: str, args, batch_dir: Path) -> dict:
             first = [line[2:] for line in unavailable[1].splitlines() if line.startswith('- ')]
             entry['error'] = (first[0] if first else '')[:500]
     if entry['status'] == 'failed':  # No evidence: placeholder fields would only mislead a comparison.
-        entry.update(duration='', transcript='', frames=0)
+        entry.update(duration='', transcript='', frames=0, cuts_per_min='', mean_shot_s='', editing_pace='')
     entry['report_text'] = report
     return entry
 
@@ -171,6 +181,11 @@ def main() -> int:
     ap.add_argument('--start', default=None)
     ap.add_argument('--end', default=None)
     ap.add_argument('--no-dedup', action='store_true')
+    ap.add_argument('--hook', type=float, nargs='?', const=3.0, default=None, metavar='SECONDS',
+                    help='Hook frames at 2 fps over each opening (default 3 s here, to keep image cost down)')
+    ap.add_argument('--pacing', action=argparse.BooleanOptionalAction, default=None,
+                    help='Editing pace per video (default on unless --detail transcript)')
+    ap.add_argument('--prompt', default=None, help='Vocabulary hint for speech fallback, shared by every video')
     speech = ap.add_mutually_exclusive_group()
     speech.add_argument('--no-whisper', action='store_true')
     speech.add_argument('--whisper', choices=['groq', 'openai', 'whisperx', 'onnx'], default=None)
@@ -222,11 +237,12 @@ def main() -> int:
     print()
     print('## Index')
     print()
-    print('| # | Status | Title | Uploader | Date | Duration | Engagement | Frames | Transcript |')
-    print('|---|---|---|---|---|---|---|---|---|')
+    print('| # | Status | Title | Uploader | Date | Duration | Engagement | Cuts/min | Mean shot | Frames | Transcript |')
+    print('|---|---|---|---|---|---|---|---|---|---|---|')
     for entry in entries:
         print('| ' + ' | '.join(_cell(entry.get(key)) for key in (
-            'index', 'status', 'title', 'uploader', 'upload_date', 'duration', 'engagement', 'frames', 'transcript')) + ' |')
+            'index', 'status', 'title', 'uploader', 'upload_date', 'duration', 'engagement', 'cuts_per_min',
+            'mean_shot_s', 'frames', 'transcript')) + ' |')
     failures = [entry for entry in entries if entry['status'] != 'ok' and entry.get('error')]
     if failures:
         print()

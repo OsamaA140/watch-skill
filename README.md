@@ -270,6 +270,19 @@ A 16×16 **RGB** thumbnail pass removes near-duplicates using mean channel diffe
 
 After reading a transcript, the agent can pin “look here” moments with `--timestamps`. These consume the frame budget first. A caption-only pass may not download a video; in that case the cue pass uses the URL again. An audio-only download cannot supply cue frames.
 
+## Editing pace, hook and saved reports
+
+Every local report with frames includes an **Editing pace** line: hard cuts, shots, cuts per minute, mean/median/longest shot and the first cut, plus a list of cut times. It comes from a separate, cheap thumbnail decode and counts hard cuts only (caption changes, zooms and pans are not cuts). `--no-pacing` skips it; `--pacing` forces it with `--detail transcript` or past 20 minutes. Batch reports put cuts/min and mean shot in the comparison table and CSV.
+
+```text
+/watch https://www.tiktok.com/@brand/video/123 --hook 5      # frames every 0.5 s over the first 5 s
+/watch interview.mp4 --prompt "Ritz-Carlton Riyadh, Diriyah"  # spell names right when there are no captions
+```
+
+`--hook [SECONDS]` (default 10, max 30) adds dense opening frames with the speech in that window. `--prompt` gives Whisper the names and terms to expect (groq, openai, whisperx; the onnx backend ignores it).
+
+Ask for a saved report and the agent writes a structured Markdown note (summary, key moments, hook, editing, offer and call to action, quotes, people and brands, ideas, transcript) with Obsidian-style frontmatter. `setup.py --vault ~/Obsidian/MyVault` remembers a notes folder; the agent asks before each save, writes to `watched/` inside it, and never opens apps or deletes notes.
+
 ## Captions, authentication, and partial results
 
 Auto caption selection uses original-language evidence when available, preferring same-language manual captions before original ASR. It requests at most one track. Unknown provenance is labeled unknown. `--sub-lang CODE` / `WATCH_SUB_LANG` chooses an explicit language, which may be a translation.

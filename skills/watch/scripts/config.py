@@ -247,6 +247,7 @@ def get_config(*, backend_override: str | None = None) -> dict:
         'onnx_model': setting('WATCH_ONNX_MODEL', 'turbo') or 'turbo',
         'onnx_threads': setting('WATCH_ONNX_THREADS'),
         'onnx_timeout': setting('WATCH_ONNX_TIMEOUT'),
+        'vault_dir': setting('WATCH_VAULT_DIR'),
     }
 
 

@@ -174,7 +174,8 @@ MAX_429_RETRIES = 2
 RETRY_BASE_DELAY = 2.0
 
 
-def _post_whisper(endpoint: str, api_key: str, model: str, audio_path: Path, language: str | None = None) -> dict:
+def _post_whisper(endpoint: str, api_key: str, model: str, audio_path: Path, language: str | None = None,
+                  prompt: str | None = None) -> dict:
     if audio_path.stat().st_size > MAX_UPLOAD_BYTES:
         raise SystemExit("Audio file exceeds the 24,000,000-byte upload budget; split it before upload.")
     fields = {
@@ -184,6 +185,8 @@ def _post_whisper(endpoint: str, api_key: str, model: str, audio_path: Path, lan
     }
     if language:  # ISO 639-1 spoken-language hint; improves accuracy (e.g. Arabic) and skips misdetection.
         fields["language"] = language
+    if prompt:  # Vocabulary/style hint: names, brands, terms. Whisper reads only its last ~224 tokens.
+        fields["prompt"] = prompt
     body, boundary = _build_multipart(fields, audio_path)
     if len(body) > MAX_MULTIPART_BYTES:
         raise SystemExit("Multipart request exceeds the 25,000,000-byte limit.")
@@ -335,12 +338,13 @@ def transcribe_chunks(
     return segments
 
 
-def _transcribe_file(backend: str, api_key: str, audio_path: Path, language: str | None = None) -> list[dict]:
+def _transcribe_file(backend: str, api_key: str, audio_path: Path, language: str | None = None,
+                     prompt: str | None = None) -> list[dict]:
     """Upload one audio file and return its 0-based segments."""
     if backend == "groq":
-        response = _post_whisper(GROQ_ENDPOINT, api_key, GROQ_MODEL, audio_path, language)
+        response = _post_whisper(GROQ_ENDPOINT, api_key, GROQ_MODEL, audio_path, language, prompt)
     elif backend == "openai":
-        response = _post_whisper(OPENAI_ENDPOINT, api_key, OPENAI_MODEL, audio_path, language)
+        response = _post_whisper(OPENAI_ENDPOINT, api_key, OPENAI_MODEL, audio_path, language, prompt)
     else:
         raise SystemExit(f"Unknown whisper backend: {backend}")
     return _segments_from_response(response)
@@ -352,6 +356,7 @@ def transcribe_video(
     backend: str | None = None,
     api_key: str | None = None,
     language: str | None = None,
+    prompt: str | None = None,
 ) -> tuple[list[dict], str]:
     """Run the full flow: extract audio → upload → parse segments.
 
@@ -368,7 +373,7 @@ def transcribe_video(
         if api_key is not None:
             raise SystemExit("WhisperX does not accept an API key.")
         from local_whisperx import transcribe_audio
-        segments = transcribe_audio(extract_audio(video_path, audio_out), language=language)
+        segments = transcribe_audio(extract_audio(video_path, audio_out), language=language, prompt=prompt)
         return segments, "whisperx"
     if backend not in (None, "groq", "openai"):
         raise SystemExit("Unknown transcription backend.")
@@ -390,8 +395,8 @@ def transcribe_video(
     audio_bytes = audio_path.stat().st_size
 
     def transcribe_one(path: Path) -> list[dict]:
-        if language:
-            return _transcribe_file(backend, api_key, path, language)
+        if language or prompt:
+            return _transcribe_file(backend, api_key, path, language, prompt)
         return _transcribe_file(backend, api_key, path)
 
     if audio_bytes <= MAX_UPLOAD_BYTES:
@@ -428,10 +433,11 @@ if __name__ == "__main__":
     parser.add_argument("audio_out", nargs="?", default="audio.mp3", type=Path)
     parser.add_argument("--backend", choices=["groq", "openai", "whisperx", "onnx"])
     parser.add_argument("--language", default=None, help="Two-letter spoken-language hint, e.g. ar")
+    parser.add_argument("--prompt", default=None, help="Vocabulary hint: names, brands and terms said in the audio")
     args = parser.parse_args()
     try:
         segments, backend = transcribe_video(args.video, Path(args.audio_out), backend=args.backend,
-                                             language=args.language)
+                                             language=args.language, prompt=args.prompt)
     except ConfigError as exc:
         raise SystemExit(str(exc)) from None
     print(json.dumps({"backend": backend, "segments": segments}, indent=2))

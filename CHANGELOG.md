@@ -2,6 +2,20 @@
 
 All notable changes to `/watch` are documented here.
 
+## [0.5.0] — 2026-10-28
+
+Ideas taken from two other projects and rebuilt on this pipeline: the editing-pace metrics, hook microscope and structured report from taoufik123-collab/claude-watch, and the Whisper vocabulary prompt and private-address URL guard from Graphify-Labs/graphify.
+
+### Added
+- **Editing pace** (`pacing.py`): hard cuts, shots, cuts/min, mean/median/longest shot and first cut, from one thumbnail-size FFmpeg pass that is independent of frame selection. Reports get an `Editing pace` line and a `## Cuts` list (times to a tenth of a second). On by default with frames for ranges up to 20 minutes; `--pacing`/`--no-pacing` override. Measured on synthetic clips: flat-colour cuts score 0.24–0.27 and are counted, a price-caption change on a static shot (<0.05) and a continuous zoom (<0.1) are not.
+- **Hook microscope**: `--hook [SECONDS]` (default 10, max 30) adds frames every 0.5 s over the opening with the speech in that window, in its own `## Hook` section. Unlike claude-watch it also runs on videos under 30 s and needs no API key.
+- **Batch pacing columns**: the index table, CSV and JSON carry cuts/min and mean shot per video; `batch.py --hook` adds 3 s of hook frames per video.
+- **Vocabulary prompt**: `--prompt` sends names, brands and terms to Whisper (`prompt` on groq/openai, `--initial_prompt` on whisperx). onnx has no prompt and says so.
+- **Saved reports**: `references/report-template.md` defines a structured report (summary, key moments, hook, editing, offer/CTA, quotes, people/brands, ideas, transcript) with Obsidian-style frontmatter and links. `setup.py --vault <folder>` saves a notes folder (`WATCH_VAULT_DIR`, shown as `vault_dir`); reports go there only after a yes for each one, and watch never opens apps or deletes notes.
+
+### Security
+- Links to loopback, private, link-local and local-network hosts are refused before yt-dlp runs (`WATCH_ALLOW_PRIVATE_URLS=1` to allow your own media server).
+
 ## [0.4.1] — 2026-10-07
 
 ### Fixed

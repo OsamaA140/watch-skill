@@ -1,7 +1,7 @@
 {
   "name": "watch",
-  "version": "0.4.1",
-  "description": "Watch videos from YouTube, TikTok, Instagram and more: timestamped frames that keep on-screen text, voices transcribed from captions or a local Whisper model (Arabic included), batch comparison of many videos, and a Cowork route through your own Chrome.",
+  "version": "0.5.0",
+  "description": "Watch videos from YouTube, TikTok, Instagram and more: timestamped frames that keep on-screen text, voices transcribed from captions or a local Whisper model (Arabic included), editing pace and a hook microscope, batch comparison of many videos, saved reports for your notes, and a Cowork route through your own Chrome.",
   "author": {
     "name": "Bradley Bonanno"
   },
@@ -25,6 +25,9 @@
     "cowork",
     "arabic",
     "onnx",
-    "batch"
+    "batch",
+    "pacing",
+    "hook",
+    "obsidian"
   ]
 }

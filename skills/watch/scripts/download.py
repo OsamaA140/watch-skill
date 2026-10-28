@@ -2,7 +2,9 @@
 """Bounded captions and isolated per-run media downloads through yt-dlp."""
 from __future__ import annotations
 
+import ipaddress
 import json
+import os
 import re
 import sys
 import tempfile
@@ -20,6 +22,28 @@ def is_url(source: str) -> bool:
 
 
 CAPTION_EXTS = ('.vtt', '.srt')
+LOCAL_SUFFIXES = ('.localhost', '.local', '.internal', '.lan', '.home.arpa')
+
+
+def check_public_url(url: str) -> None:
+    """Refuse links that point into this machine or its private network.
+
+    A pasted link (or one found in a video description) should never make watch
+    fetch from localhost, a router, or a cloud metadata address. Only the host
+    as written is checked; nothing is resolved. WATCH_ALLOW_PRIVATE_URLS=1
+    allows it for a user's own media server.
+    """
+    if os.environ.get('WATCH_ALLOW_PRIVATE_URLS', '').strip() == '1':
+        return
+    host = (urlparse(url).hostname or '').rstrip('.').lower()
+    try:
+        address = ipaddress.ip_address(host)
+        private = not address.is_global
+    except ValueError:
+        private = host == 'localhost' or host.endswith(LOCAL_SUFFIXES)
+    if private:
+        raise SystemExit(f'Refusing a private or local network address ({host or "no host"}). '
+                         'Set WATCH_ALLOW_PRIVATE_URLS=1 for your own media server.')
 
 
 def find_sidecars(video: Path) -> dict:
@@ -163,6 +187,7 @@ def expand_collection(url: str, limit: int, *, cookies_file=None, cookies_from_b
     """
     if limit < 1:
         raise SystemExit('The collection limit must be at least 1.')
+    check_public_url(url)
     auth = auth_args(cookies_file, cookies_from_browser)
     result = _run(['yt-dlp', '--flat-playlist', '--yes-playlist', '--ignore-no-formats-error', *auth,
                    '--playlist-end', str(limit), '--print', '%(webpage_url,url)s', '--', url])
@@ -213,6 +238,7 @@ def select_caption(info: dict, language: str = 'auto') -> dict | None:
 
 
 def fetch_captions(url: str, out_dir: Path, *, sub_lang='auto', cookies_file=None, cookies_from_browser=None) -> dict:
+    check_public_url(url)
     auth = auth_args(cookies_file, cookies_from_browser)
     run = _new_run(out_dir)
     info_path = run / 'video.info.json'
@@ -245,6 +271,7 @@ def fetch_captions(url: str, out_dir: Path, *, sub_lang='auto', cookies_file=Non
 
 def download_url(url: str, out_dir: Path, audio_only: bool = False, *, context=None,
                  cookies_file=None, cookies_from_browser=None) -> dict:
+    check_public_url(url)
     auth = auth_args(cookies_file, cookies_from_browser)
     context = context or {}
     run = Path(context['run_dir']) if context.get('run_dir') else _new_run(out_dir)

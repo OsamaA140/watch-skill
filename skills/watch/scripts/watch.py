@@ -20,7 +20,8 @@ sys.path.insert(0, str(SCRIPT_DIR))
 from config import ConfigError, frame_cap, get_config, load_gemini_key, resolve_engine, site_cookie_for, validate_language  # noqa: E402
 import gemini  # noqa: E402
 from download import download, fetch_captions, is_url, auth_args  # noqa: E402
-from frames import MAX_FPS, auto_fps, auto_fps_focus, extract_at_timestamps, extract_keyframes, extract_scene_or_uniform, format_time, get_metadata, merge_frames, parse_time, parse_timestamps, validate_controls  # noqa: E402
+from frames import MAX_FPS, auto_fps, auto_fps_focus, dedupe_perceptual, extract, extract_at_timestamps, extract_keyframes, extract_scene_or_uniform, format_time, get_metadata, merge_frames, parse_time, parse_timestamps, validate_controls  # noqa: E402
+import pacing  # noqa: E402
 from transcribe import filter_range, format_transcript, parse_vtt  # noqa: E402
 from whisper import load_api_key, transcribe_video  # noqa: E402
 from runtime import configure_stdio  # noqa: E402
@@ -28,7 +29,10 @@ from runtime import configure_stdio  # noqa: E402
 
 LOCAL_ONLY_FLAGS = (("--detail", "detail"), ("--fps", "fps"), ("--max-frames", "max_frames"),
                     ("--timestamps", "timestamps"), ("--whisper", "whisper"), ("--sub-lang", "sub_lang"),
-                    ("--resolution", "resolution"), ("--language", "language"))
+                    ("--resolution", "resolution"), ("--language", "language"), ("--hook", "hook"),
+                    ("--pacing/--no-pacing", "pacing"), ("--prompt", "prompt"))
+HOOK_FPS = 2.0
+HOOK_MAX_SECONDS = 30.0
 
 ARABIC_LETTERS = range(0x0621, 0x064B)
 URDU_ONLY = set('ٹڈڑںےۓ')
@@ -225,6 +229,15 @@ def main() -> int:
     cookies = ap.add_mutually_exclusive_group()
     cookies.add_argument("--cookies", default=None, help="Explicit cookie file (yt-dlp may update this jar)")
     cookies.add_argument("--cookies-from-browser", default=None, help="Explicit yt-dlp browser selector")
+    ap.add_argument("--hook", type=float, nargs="?", const=10.0, default=None, metavar="SECONDS",
+                    help="Hook microscope: extra frames at 2 fps over the opening SECONDS (default 10, max 30), "
+                         "listed with the speech in that window.")
+    ap.add_argument("--pacing", action=argparse.BooleanOptionalAction, default=None,
+                    help="Editing pace (cuts, shot lengths, cuts/min). Default on with frames for ranges up to "
+                         "20 minutes; --pacing forces it (also with transcript detail), --no-pacing skips it.")
+    ap.add_argument("--prompt", default=None,
+                    help="Vocabulary hint for speech fallback: names, brands, places and terms said in the video. "
+                         "Used by groq, openai and whisperx; the onnx backend ignores it.")
     ap.add_argument("--engine", choices=["auto", "gemini", "local"], default=None,
                     help="gemini: Google watches the video and answers (needs GEMINI_API_KEY). "
                          "local: frames + transcript on this machine. Default auto: gemini when a key exists.")
@@ -233,6 +246,10 @@ def main() -> int:
     args = ap.parse_args()
     if args.no_whisper and args.whisper:
         ap.error("--no-whisper conflicts with --whisper")
+    if args.hook is not None and not (0 < args.hook <= HOOK_MAX_SECONDS):
+        ap.error(f"--hook must be between 0 and {HOOK_MAX_SECONDS:g} seconds")
+    if args.prompt is not None:
+        args.prompt = " ".join(args.prompt.split())[:600] or None
 
     config = get_config(backend_override="none" if args.no_whisper else args.whisper)
     detail = args.detail or config["detail"]
@@ -362,6 +379,34 @@ def main() -> int:
     if cue_frames:
         frames = merge_frames(frames, cue_frames)
 
+    has_video = bool(video_path and meta.get("has_video", bool(meta.get("width"))))
+    pace, pace_note = None, None
+    pacing_wanted = args.pacing if args.pacing is not None else (
+        detail != "transcript" and effective_duration <= pacing.AUTO_MAX_SECONDS)
+    if has_video and pacing_wanted and effective_duration > 0:
+        try:
+            print("[watch] measuring editing pace…", file=sys.stderr)
+            cuts = pacing.detect_cuts(video_path, start_sec, effective_end or None)
+            pace = pacing.compute_pacing(cuts, effective_start, effective_end)
+        except SystemExit as exc:
+            pace_note = f"unavailable: {exc}"
+    elif has_video and args.pacing is None and detail != "transcript":
+        pace_note = f"skipped for a range over {pacing.AUTO_MAX_SECONDS // 60} minutes; rerun with --pacing"
+
+    hook_frames, hook_end, hook_dropped = [], None, 0
+    if has_video and args.hook:
+        hook_end = min(args.hook, full_duration) if full_duration > 0 else args.hook
+        try:
+            hook_frames = extract(video_path, work / "hook", fps=HOOK_FPS, resolution=resolution,
+                                  max_frames=int(math.ceil(hook_end * HOOK_FPS)) + 1,
+                                  start_seconds=0.0, end_seconds=hook_end)
+            if not args.no_dedup:
+                hook_frames, hook_dropped = dedupe_perceptual(hook_frames)
+        except SystemExit as exc:
+            errors.append(f"Hook frames unavailable: {exc}")
+    elif args.hook and video_path is None and not visual_error:
+        errors.append("Hook frames need the video itself; none was downloaded.")
+
     transcript_state = "missing"
     language, language_origin = None, None
     if not track_available and backend_choice != "none" and video_path and meta.get("has_audio"):
@@ -369,6 +414,10 @@ def main() -> int:
         if backend:
             language, language_origin = resolve_language(args.language, config, dl.get("info"), backend)
             extra = {"language": language} if language else {}
+            if args.prompt:
+                extra["prompt"] = args.prompt
+                if backend == "onnx":
+                    print("[watch] the onnx backend has no vocabulary prompt; --prompt ignored", file=sys.stderr)
             try:
                 all_segments, used_backend = transcribe_video(video_path, work / "audio.mp3", backend=backend,
                                                               api_key=api_key, **extra)
@@ -387,6 +436,8 @@ def main() -> int:
                         transcript_source += f"; {filtered} likely non-speech piece{'s' if filtered != 1 else ''} (music/noise) dropped"
                 else:
                     transcript_source = f"whisper ({used_backend}, language {hint or 'auto-detected'})"
+                if args.prompt and used_backend != "onnx":
+                    transcript_source += "; vocabulary prompt used"
             except SystemExit as exc:
                 transcript_state = "failed"
                 errors.append(f"Transcription failed: {exc}")
@@ -464,7 +515,15 @@ def main() -> int:
             f"- **Cue frames:** {len(cue_frames)} at transcript-flagged timestamps "
             f"(transcript-cue{drop_note})"
         )
-    if frames:
+    if hook_frames:
+        hook_note = f", {hook_dropped} near-duplicate{'s' if hook_dropped != 1 else ''} dropped" if hook_dropped else ""
+        print(f"- **Hook frames:** {len(hook_frames)} over 00:00 → {format_time(hook_end)} "
+              f"({HOOK_FPS:g} fps{hook_note})")
+    if pace:
+        print(f"- **Editing pace:** {pacing.summary_line(pace)}")
+    elif pace_note:
+        print(f"- **Editing pace:** {pace_note}")
+    if frames or hook_frames:
         orientation = " (vertical video)" if portrait and not args.resolution else ""
         print(f"- **Frame size:** max {resolution}px wide{orientation}, max 1998px tall")
     if transcript_segments:
@@ -516,6 +575,31 @@ def main() -> int:
             )
     else:
         print("_No frames extracted._")
+
+    if hook_frames:
+        print()
+        print(f"## Hook (00:00 → {format_time(hook_end)})")
+        print()
+        print("Dense frames over the opening, separate from the frames above. **Read each one.** "
+              "Line them up with the speech below: what is on screen, what is said, and when the first "
+              "change, text or promise lands.")
+        print()
+        for frame in hook_frames:
+            print(f"- `{frame['path']}` (t={frame['timestamp_seconds']:.1f}s)")
+        opening = format_transcript(filter_range(all_segments, 0.0, hook_end)) if all_segments else ""
+        print()
+        if opening:
+            print("```")
+            print(opening)
+            print("```")
+        else:
+            print("_No speech in the opening._" if track_available else "_No transcript for the opening._")
+
+    if pace and pace["cuts"]:
+        print()
+        print("## Cuts")
+        print()
+        print(f"Hard cuts at: {pacing.cut_list(pace)}")
 
     print()
     print("## Transcript")
