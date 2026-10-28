@@ -1,0 +1,30 @@
+{
+  "name": "watch",
+  "version": "0.4.1",
+  "description": "Watch videos from YouTube, TikTok, Instagram and more: timestamped frames that keep on-screen text, voices transcribed from captions or a local Whisper model (Arabic included), batch comparison of many videos, and a Cowork route through your own Chrome.",
+  "author": {
+    "name": "Bradley Bonanno"
+  },
+  "homepage": "https://github.com/bradautomates/claude-video",
+  "repository": "https://github.com/bradautomates/claude-video",
+  "license": "MIT",
+  "keywords": [
+    "video",
+    "watch",
+    "youtube",
+    "vimeo",
+    "tiktok",
+    "transcription",
+    "whisper",
+    "yt-dlp",
+    "ffmpeg",
+    "multimodal",
+    "frames",
+    "whisperx",
+    "instagram",
+    "cowork",
+    "arabic",
+    "onnx",
+    "batch"
+  ]
+}
